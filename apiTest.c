@@ -17,10 +17,6 @@ struct Buffer {
     int data_size;
 };
 
-void*   thread_func(void*);                                 // function executed in sub thread
-int     makeSocket(char*);                                  // making socket
-int     startRecAndRead(int);                               // start read voice data with popen func
-void    sendData(int, int);                                 // send recorded voice data
 char*   callGoogleSpeechAPI();                              // get text from voice data
 char*   callGoogleTranslatorAPI(char*, char*, char*);       // get translated text.(text, from, to)
 size_t  buffer_writer(char*, size_t, size_t, void*);        // callback func for SpeechAPI http session
@@ -33,125 +29,17 @@ const int n_length = 1;   // length of bytes to send
 
 
 int main(int argc, char** argv) {
+    char *text1 = callGoogleSpeechAPI();
+    printf("text1 : %s\n", text1);
 
-    pthread_t thread;
+    char *text2 = callGoogleTranslatorAPI(text1, "en", "ja");
+    printf("text2 : %s\n", text2);
 
-    int s = -2;               // means not connected 
-    s = makeSocket(argv[1]);
-    
-    // recieve and play peer voice data in sub thread
-    // also, translate and speech will be done.
-    pthread_create(&thread, NULL, &thread_func, &s);
-    
-    // send voice data in main thread
-    if (s == -1) {
-        perror("accept\n");
-        exit(1); 
-    }else if(s >= 0){
-        printf("start rec and read\n");
-        if(startRecAndRead(s) == 0){
-            printf("popen error\n");
-        }else{
-            sendData(s, n_length);
-        }
-    }
-  close(s);
+    speechText(text2);
 
-  return 0;
+    return 0;
 }
 
-// making socket
-int makeSocket(char* portNo){
-    int ss = socket(PF_INET, SOCK_STREAM, 0);
-    if (ss == -1) {
-        perror("socket");
-        exit(1);
-    }
-
-    //bind
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    /* 返り値が-1にはならないっぽい */
-    if ((addr.sin_port = htons(atoi(portNo))) == 0) { //port_number
-        printf("port error");
-        exit(1);
-    }
-
-    addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(ss, (const struct sockaddr*)&addr, sizeof(addr)) == -1) {
-        exit(1);
-    }
-
-    //listen
-    if (listen(ss, 10) == -1){
-        perror("listen");
-        exit(1);
-    }
-
-    //accept
-    struct sockaddr_in client_addr;
-    socklen_t len = sizeof(struct sockaddr_in);
-    int s = accept(ss, (struct sockaddr*)&client_addr, &len);
-    close(ss);
-    return s;
-}
-
-// function executed in sub thread
-void * thread_func(void * s){
-    int *sock = (int *)s;
-    short *buff;
-    buff = (short *)malloc(sizeof(short) * n_length);
-    while(1){
-            int n = read(*sock, buff, n_length);
-            if(n == -1){
-                perror("read");
-                exit(1);
-            }
-        if(n == 0) break;
-        write(1, buff, n_length);
-        
-        // ここがキモ．
-        // N byte溜まったらファイルに書き出す
-        // その後一連のAPIをcallする
-        FILE *fp;
-        char *cmdline;
-        cmdline = (char *)malloc(sizeof(char) * 128);
-        sprintf(cmdline, "sox -b 16 -c 1 -e s -r 44100 write.raw write.flac");
-        if((fp=popen(cmdline, "w")) == NULL){
-            printf("popen error\n");
-        }
-        (void)pclose(fp);
-        free(cmdline);
-
-    }
-}
-
-
-int startRecAndRead(int s){
-    FILE *fp;
-    char *cmdline;
-    cmdline = (char *)malloc(sizeof(char) * 128);
-    sprintf(cmdline, "rec -t raw -b 16 -c 1 -e s -r 44100 - | ./read %d", s);
-    fp=popen(cmdline, "w");
-    free(cmdline);
-    if(fp == NULL) {
-        (void)pclose(fp);
-        return 0;
-    }
-    (void)pclose(fp);
-    return 1;
-}
-
-void sendData(int s, int n_length){
-    short *buff;
-    buff = (short *)malloc(sizeof(short) * n_length);
-    while(1){
-        fprintf(stderr, "pthread");
-        int n = read(0, buff, n_length);
-        send(s, buff, n_length, 0);
-        if(n == 0) return;
-    }
-}
 
 char* callGoogleSpeechAPI(){
     struct Buffer *buf;
@@ -226,11 +114,10 @@ char* callGoogleTranslatorAPI(char* text, char* from, char* to){
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, buffer_writer);
 
     //セッション開始
-    curl_easy_perform(curl);
+    //curl_easy_perform(curl);
     curl_easy_cleanup(curl);
-    //char *demoString = "{\"data\": {\"translations\": [{\"translatedText\": \"よく私はAMERICの米国がある今夜リベラルアメリカと保守的なアメリカがない彼らに言います\",\"detectedSourceLanguage\": \"en\"}]}";
-    char *result = getAimedStringFromText("translatedText",buf -> data);
-    printf("%s\n", result);
+    char *demoString = "{\"data\": {\"translations\": [{\"translatedText\": \"よく私はAMERICの米国がある今夜リベラルアメリカと保守的なアメリカがない彼らに言います\",\"detectedSourceLanguage\": \"en\"}]}";
+    char *result = getAimedStringFromText("translatedText",demoString);
 
     free(buf->data);
     free(buf);
