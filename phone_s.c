@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <curl/curl.h>
 #include <string.h>
+#include <fcntl.h>
 
 struct Buffer {
     char *data;
@@ -18,11 +19,12 @@ struct Buffer {
 };
 
 void*   thread_func(void*);                                 // function executed in sub thread
+void*   thread_func2(void*);                                 // function executed in sub thread
 int     makeSocket(char*);                                  // making socket
 int     startRecAndRead(int);                               // start read voice data with popen func
 void    sendData(int, int);                                 // send recorded voice data
-char*   callGoogleSpeechAPI();                              // get text from voice data
-char*   callGoogleTranslatorAPI(char*, char*, char*);       // get translated text.(text, from, to)
+char*   callGoogleSpeechAPI(char*);                         // get text from voice data
+void    callGoogleTranslatorAPI(char*, char*, char*);       // get translated text.(text, from, to)
 size_t  buffer_writer(char*, size_t, size_t, void*);        // callback func for SpeechAPI http session
 char*   splitResultString(char*);                           // split the result string from google speech api
 char*   getAimedStringFromText(char*, char*);               // generalize above
@@ -30,7 +32,10 @@ void    speechText(char*);                                  // speech text with 
 char*   makeStringForParam(char*);                          // convert plain text to the one suite for GET param
         
 const int n_length = 1;   // length of bytes to send
-
+    
+// file name for the text to translate is "toToranslate.txt"
+// the one for the text translated is "translated.txt" 
+// the one for voice data is "voice.raw" and "voice.flac"
 
 int main(int argc, char** argv) {
 
@@ -60,6 +65,58 @@ int main(int argc, char** argv) {
   return 0;
 }
 
+
+// function executed in sub thread
+void * thread_func(void * s){
+    int *sock = (int *)s;
+    short *buff;
+    buff = (short *)malloc(sizeof(short) * n_length);
+
+    int fileSize = 520000;
+    int count = 0;
+    while(1){
+        int n = read(*sock, buff, n_length);
+        if(n == -1){
+            perror("read");
+            exit(1);
+        }
+        if(n == 0) break;
+        write(1, buff, n_length);
+
+        count++;
+
+        if(count == fileSize){
+            fprintf(stderr, "API叩くよ！\n");
+            count = 0;
+            // remove voice.raw every 5sec(aproximately)
+            FILE *fp;
+            char *cmdline;
+            cmdline = (char *)malloc(sizeof(char) * 128);
+
+            sprintf(cmdline, "sox -b 16 -c 1 -e s -r 16000 voice.raw voice.flac");
+            if((fp=popen(cmdline, "w")) == NULL){
+                printf("popen error\n");
+            }
+
+            //sprintf(cmdline, "rm voice.raw");
+            //if((fp=popen(cmdline, "w")) == NULL){
+            //    printf("popen error\n");
+            //}
+
+            (void)pclose(fp);
+            free(cmdline);
+
+            // call speech API
+            char *toTranslateString = callGoogleSpeechAPI("voice.flac");
+            // call translate API
+            callGoogleTranslatorAPI(toTranslateString, "en", "ja");
+            // run 'say' command
+            speechText("translated.txt");
+        }
+    }
+
+}
+
 // making socket
 int makeSocket(char* portNo){
     int ss = socket(PF_INET, SOCK_STREAM, 0);
@@ -71,11 +128,7 @@ int makeSocket(char* portNo){
     //bind
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
-    /* 返り値が-1にはならないっぽい */
-    if ((addr.sin_port = htons(atoi(portNo))) == 0) { //port_number
-        printf("port error");
-        exit(1);
-    }
+    addr.sin_port = htons(atoi(portNo));
 
     addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(ss, (const struct sockaddr*)&addr, sizeof(addr)) == -1) {
@@ -96,42 +149,12 @@ int makeSocket(char* portNo){
     return s;
 }
 
-// function executed in sub thread
-void * thread_func(void * s){
-    int *sock = (int *)s;
-    short *buff;
-    buff = (short *)malloc(sizeof(short) * n_length);
-    while(1){
-            int n = read(*sock, buff, n_length);
-            if(n == -1){
-                perror("read");
-                exit(1);
-            }
-        if(n == 0) break;
-        write(1, buff, n_length);
-        
-        // ここがキモ．
-        // N byte溜まったらファイルに書き出す
-        // その後一連のAPIをcallする
-        FILE *fp;
-        char *cmdline;
-        cmdline = (char *)malloc(sizeof(char) * 128);
-        sprintf(cmdline, "sox -b 16 -c 1 -e s -r 44100 write.raw write.flac");
-        if((fp=popen(cmdline, "w")) == NULL){
-            printf("popen error\n");
-        }
-        (void)pclose(fp);
-        free(cmdline);
-
-    }
-}
-
 
 int startRecAndRead(int s){
     FILE *fp;
     char *cmdline;
     cmdline = (char *)malloc(sizeof(char) * 128);
-    sprintf(cmdline, "rec -t raw -b 16 -c 1 -e s -r 44100 - | ./read %d", s);
+    sprintf(cmdline, "rec -t raw -b 16 -c 1 -e s -r 16000 - | ./read %d", s);
     fp=popen(cmdline, "w");
     free(cmdline);
     if(fp == NULL) {
@@ -153,7 +176,7 @@ void sendData(int s, int n_length){
     }
 }
 
-char* callGoogleSpeechAPI(){
+char* callGoogleSpeechAPI(char* fileName){
     struct Buffer *buf;
     buf = (struct Buffer *)malloc(sizeof(struct Buffer));
     buf->data = NULL;
@@ -171,7 +194,7 @@ char* callGoogleSpeechAPI(){
     curl = curl_easy_init();
     //接続先の設定
     headerlist = curl_slist_append(headerlist, "Content-Type:audio/x-flac; rate=16000");
-    curl_formadd(&post, &last, CURLFORM_COPYNAME, "obama.flac",  CURLFORM_FILE, "obama.flac", CURLFORM_END);
+    curl_formadd(&post, &last, CURLFORM_COPYNAME, "voice.flac",  CURLFORM_FILE, "voice.flac", CURLFORM_END);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl,CURLOPT_POST, 1);
     curl_easy_setopt(curl, CURLOPT_HEADER, 0);
@@ -199,7 +222,7 @@ char* callGoogleSpeechAPI(){
     return result;
 }
 
-char* callGoogleTranslatorAPI(char* text, char* from, char* to){
+void callGoogleTranslatorAPI(char* text, char* from, char* to){
     struct Buffer *buf;
     buf = (struct Buffer *)malloc(sizeof(struct Buffer));
     buf->data = NULL;
@@ -235,21 +258,26 @@ char* callGoogleTranslatorAPI(char* text, char* from, char* to){
     free(buf->data);
     free(buf);
 
-    FILE *fp;   /* (1)ファイルポインタの宣言 */
-    /* (2)ファイルのオープン */
-    /*  ここで、ファイルポインタを取得する */
+    // write out translated string to .txt file
+    FILE *fp;
     if ((fp = fopen("translated.txt", "w")) == NULL) {
         printf("file open error!!\n");
-        exit(EXIT_FAILURE); /* (3)エラーの場合は通常、異常終了する */
+        exit(EXIT_FAILURE);
     }
-    
     int sizeOfResult = strlen(result);
-
     fwrite(result, sizeof(char), sizeOfResult, fp);
-    
-    fclose(fp); /* (5)ファイルのクローズ */
+    fclose(fp);
 
-    return result;
+    char *cmdline;
+    cmdline = (char *)malloc(sizeof(char) * 128);
+    sprintf(cmdline, "nkf -w --overwrite translated.txt ");
+    fp=popen(cmdline, "w");
+    free(cmdline);
+    if(fp == NULL) {
+        (void)pclose(fp);
+    }
+    (void)pclose(fp);
+
 }
 
 size_t buffer_writer(char *ptr, size_t size, size_t nmemb, void *stream) {
@@ -332,11 +360,12 @@ char* splitResultString(char* resultString){
 }
 
 
-void speechText(char* text){
+void speechText(char* fileName){
     FILE *fp;
     char *cmdline;
     cmdline = (char *)malloc(sizeof(char) * 256);
     sprintf(cmdline, "say -v Kyoko -f translated.txt");
+    //sprintf(cmdline, "say -v Kyoko -f %s", fileName);
     fp=popen(cmdline, "w");
     free(cmdline);
     if(fp == NULL) {

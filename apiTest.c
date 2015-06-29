@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     char *text1 = callGoogleSpeechAPI();
     printf("text1 : %s\n", text1);
 
-    char *text2 = callGoogleTranslatorAPI(text1, "en", "ja");
+    char *text2 = callGoogleTranslatorAPI("hello hello  ", "en", "ja");
     printf("text2 : %s\n", text2);
 
     speechText(text2);
@@ -59,7 +59,7 @@ char* callGoogleSpeechAPI(){
     curl = curl_easy_init();
     //接続先の設定
     headerlist = curl_slist_append(headerlist, "Content-Type:audio/x-flac; rate=16000");
-    curl_formadd(&post, &last, CURLFORM_COPYNAME, "obama.flac",  CURLFORM_FILE, "obama.flac", CURLFORM_END);
+    curl_formadd(&post, &last, CURLFORM_COPYNAME, "voice.flac",  CURLFORM_FILE, "voice.flac", CURLFORM_END);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl,CURLOPT_POST, 1);
     curl_easy_setopt(curl, CURLOPT_HEADER, 0);
@@ -95,6 +95,8 @@ char* callGoogleTranslatorAPI(char* text, char* from, char* to){
 
     char *textForURL = makeStringForParam(text);
 
+    printf("%s\n", textForURL);
+
     char *url[256];
     sprintf(url,"https://www.googleapis.com/language/translate/v2?key=AIzaSyDoB9Kn2IUJdJ1SvBGIdrYLdGvhEnttE-4&target=ja&q=%s", textForURL);
     //char *url = "https://private-4d400-doodoo.apiary-mock.com/v1/shop/publish";
@@ -114,10 +116,11 @@ char* callGoogleTranslatorAPI(char* text, char* from, char* to){
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, buffer_writer);
 
     //セッション開始
-    //curl_easy_perform(curl);
+    curl_easy_perform(curl);
     curl_easy_cleanup(curl);
     char *demoString = "{\"data\": {\"translations\": [{\"translatedText\": \"よく私はAMERICの米国がある今夜リベラルアメリカと保守的なアメリカがない彼らに言います\",\"detectedSourceLanguage\": \"en\"}]}";
-    char *result = getAimedStringFromText("translatedText",demoString);
+    //printf("%s\n", buf->data);
+    char *result = getAimedStringFromText("translatedText",buf->data);
 
     free(buf->data);
     free(buf);
@@ -135,6 +138,17 @@ char* callGoogleTranslatorAPI(char* text, char* from, char* to){
     fwrite(result, sizeof(char), sizeOfResult, fp);
     
     fclose(fp); /* (5)ファイルのクローズ */
+
+    char *cmdline;
+    cmdline = (char *)malloc(sizeof(char) * 128);
+    sprintf(cmdline, "nkf -w --overwrite translated.txt ");
+    fp=popen(cmdline, "w");
+    free(cmdline);
+    if(fp == NULL) {
+        (void)pclose(fp);
+        return 0;
+    }
+    (void)pclose(fp);
 
     return result;
 }
@@ -223,7 +237,7 @@ void speechText(char* text){
     FILE *fp;
     char *cmdline;
     cmdline = (char *)malloc(sizeof(char) * 256);
-    sprintf(cmdline, "say -v Kyoko -f translated.txt");
+    sprintf(cmdline, "say -v Kyoko -f translated2.txt");
     fp=popen(cmdline, "w");
     free(cmdline);
     if(fp == NULL) {
